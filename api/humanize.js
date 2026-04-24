@@ -3,17 +3,49 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { text } = req.body;
+  const { text, mode } = req.body;
 
   if (!text || text.trim().length === 0) {
     return res.status(400).json({ error: 'No text provided' });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-
   if (!apiKey) {
     return res.status(500).json({ error: 'API key not configured' });
   }
+
+  const modeInstructions = {
+    subtle: `You are rewriting an AI-generated email to sound slightly more natural and human. 
+Rules:
+- Keep it mostly the same — just soften the robotic polish
+- Remove 2-3 obviously AI phrases like "I hope this finds you well", "please don't hesitate", "best regards"
+- Very minor word swaps to sound more casual (e.g. "utilize" → "use", "leverage" → "use")
+- Keep full sentences, grammar, punctuation intact
+- Sign off naturally: "Thanks" or just a name`,
+
+    human: `You are rewriting an AI-generated email to sound like a real busy human typed it.
+Rules:
+- Remove ALL AI-ish phrases: "certainly", "absolutely", "I'd be happy to", "leverage", "utilize", "touch base", "circle back", "synergy", "moving forward", "as per", "please don't hesitate", "best regards", "I hope this email finds you well"
+- Shorter sentences. Less fluff.
+- Occasional missing comma or lowercase where a human wouldn't bother
+- Maybe 1 small typo (like a doubled word or missing small word)
+- Sign off: "Thanks" or "Talk soon" or just name
+- Sound like someone typing on their laptop between meetings`,
+
+    ceo: `You are rewriting an AI-generated email to sound like it was typed by an extremely busy CEO on their phone in 30 seconds.
+Rules:
+- Strip it down to almost nothing — just the core ask or point
+- Very short. Blunt. No pleasantries at all.
+- Lowercase where a real person wouldn't capitalize
+- Abbreviations: lmk, fyi, tbh, asap, pls, thx, ngl
+- Incomplete sentences are fine. Fragments. Just the vibe.
+- 1-2 typos or autocorrect errors (e.g. "teh", "fo", "adn", "yuo", missing apostrophes like "dont" "cant" "wont")
+- End with "Sent from my iPhone" as the sign-off — always, every time, no exceptions
+- Maximum 3-4 lines total. Cut everything non-essential.
+- Sound like someone who has 400 unread emails and typed this with one thumb`
+  };
+
+  const instruction = modeInstructions[mode] || modeInstructions.human;
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -29,30 +61,19 @@ export default async function handler(req, res) {
         messages: [
           {
             role: 'user',
-            content: `You are a tool that rewrites AI-generated emails to sound like they were written by a real, busy human professional. 
+            content: `${instruction}
 
-Here are your strict rules:
-- Make it sound like a real person typed this quickly
-- Use casual but professional language — no formal fluff like "I hope this email finds you well"
-- Vary sentence length — some short and punchy, some longer
-- Occasionally add a small realistic typo or autocorrect-style error (like "teh" → "the", missing a word, or a repeated word) — but only 1-2 max, not every sentence
-- Remove all AI-ish phrases: "certainly", "absolutely", "I'd be happy to", "leverage", "utilize", "touch base", "circle back", "synergy", "moving forward", "best regards" etc.
-- Trim unnecessary words — busy people write short
-- Sign-offs should be brief: "Thanks", "Cheers", "Talk soon" — or just a name
-- Keep the core message and all key facts exactly the same
-- Do NOT add information that wasn't in the original
+After rewriting, list the key changes you made (short bullet points, plain language).
 
-After rewriting, provide a CHANGES SUMMARY explaining what you changed and why, in plain conversational language.
-
-Respond in this exact format — nothing before or after:
+Respond in this EXACT format with nothing before or after:
 
 REWRITTEN:
-[your rewritten email here]
+[rewritten email]
 
 CHANGES:
-[bullet point list of what you changed and why, written casually like a friend explaining it]
+[bullet points of what changed]
 
-Here is the email to humanize:
+Original email to rewrite:
 
 ${text}`
           }
@@ -72,7 +93,7 @@ ${text}`
     const changesMatch = fullResponse.match(/CHANGES:\n([\s\S]*?)$/);
 
     const rewritten = rewrittenMatch ? rewrittenMatch[1].trim() : fullResponse;
-    const changes = changesMatch ? changesMatch[1].trim() : 'No changes summary available.';
+    const changes = changesMatch ? changesMatch[1].trim() : '';
 
     return res.status(200).json({ rewritten, changes });
 
